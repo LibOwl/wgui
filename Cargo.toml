@@ -1,0 +1,15 @@
+[package]
+name = "wgui"
+version = "0.1.0"
+# author = "LibOwl"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "A GUI library for wgpu"
+documentation = "https://docs.rs/wgui"
+repository = "https://github.com/LibOwl/wgui"
+readme = "README.md"
+keywords = ["gui", "wgpu", "wgui"]
+categories = ["graphics", "gui"]
+
+[dependencies]
+# ( wgpu only, later )
