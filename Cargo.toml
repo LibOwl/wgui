@@ -1,3 +1,13 @@
+[workspace]
+members = [
+    ".",
+    "examples/*"
+]
+
+[workspace.dependencies]
+wgpu = "0.19.4"
+winit = "0.29.15"
+
 [package]
 name = "wgui"
 version = "0.1.0"
@@ -12,4 +22,5 @@ keywords = ["gui", "wgpu", "wgui"]
 categories = ["graphics", "gui"]
 
 [dependencies]
-# ( wgpu only, later )
+wgpu = "0.19.4"
+winit = "0.29.15"
