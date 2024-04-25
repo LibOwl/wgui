@@ -36,7 +36,7 @@ fn main() {
             Event::WindowEvent {
                 ref event,
                 window_id,
-            } if window_id == window.id() => {
+            } if window_id == window.id() => if !state.input(event) {
                 match event {
                     WindowEvent::KeyboardInput {
                         event:

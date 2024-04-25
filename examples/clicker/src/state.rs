@@ -2,7 +2,7 @@ use std::{cell::OnceCell, iter, mem};
 
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
-use winit::{window::Window, event::WindowEvent};
+use winit::{dpi::PhysicalPosition, event::{ElementState, MouseButton, Touch, TouchPhase, WindowEvent}, window::Window};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
@@ -102,6 +102,8 @@ pub(super) struct State<'window> {
     pipeline: wgpu::RenderPipeline,
 
     resized: bool,
+
+    cursor_pos: PhysicalPosition<f64>,
 }
 
 impl<'window> State<'window> {
@@ -315,6 +317,9 @@ impl<'window> State<'window> {
 
         let resized: bool = true;
 
+        window.set_cursor_position(PhysicalPosition::new(500.0f64, 500.0f64)).unwrap();
+        let cursor_pos: PhysicalPosition<f64> = PhysicalPosition::new(500.0f64, 500.0f64);
+
         Self {
             instance,
             surface,
@@ -340,7 +345,9 @@ impl<'window> State<'window> {
 
             pipeline,
 
-            resized
+            resized,
+
+            cursor_pos,
         }
     }
 
@@ -401,7 +408,67 @@ impl<'window> State<'window> {
 
     #[allow(unused)]
     pub(super) fn input(&mut self, event: &WindowEvent) -> bool {
+        match event {
+            WindowEvent::CursorMoved { device_id, position } => {
+                self.cursor_pos = *position;
+            }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } => {
+                self.click();
+            }
+            WindowEvent::Touch(Touch {
+                phase: TouchPhase::Started,
+                location,
+                ..
+            })=> {
+                self.cursor_pos = *location;
+
+                self.click();
+            }
+            _ => {  }
+        }
         false
+    }
+
+    fn click(&mut self) {
+        let id_buffer_index = 4 * (self.cursor_pos.y as u64 * self.size.width as u64 + self.cursor_pos.x as u64);
+
+        let mapped_id_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Readable ID Buffer"),
+            size: 4,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            });
+        {
+            encoder.copy_buffer_to_buffer(
+                &self.id_buffer, 
+                id_buffer_index as u64, 
+                &mapped_id_buffer, 
+                0, 4
+            );
+        }
+        self.queue.submit(iter::once(encoder.finish()));
+
+
+        mapped_id_buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, |result| {
+                OnceCell::new().set(result).unwrap();
+            });
+
+        self.device.poll(wgpu::Maintain::Wait);
+
+        let slice: &[u8] = &mut mapped_id_buffer.slice(..).get_mapped_range();
+        println!("{} {} {} {}", slice[0], slice[1], slice[2], slice[3]);
     }
 
     pub(super) fn update(&mut self) {
@@ -507,38 +574,3 @@ impl<'window> State<'window> {
         (mapped_id_buffer, self.size.width, self.size.height)
     }
 }
-
-// #[allow(unused)]
-// fn create_texture(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration, label: &str) -> (Texture, TextureView, Sampler) {
-//     let size = wgpu::Extent3d {
-//         width: config.width,
-//         height: config.height,
-//         depth_or_array_layers: 1,
-//     };
-//     let desc = wgpu::TextureDescriptor {
-//         label: Some(label),
-//         size,
-//         mip_level_count: 1,
-//         sample_count: 1,
-//         dimension: wgpu::TextureDimension::D2,
-//         format: wgpu::TextureFormat::R32Uint,
-//         usage: wgpu::TextureUsages::STORAGE_BINDING,
-//         view_formats: &[],
-//     };
-//     let texture = device.create_texture(&desc);
-
-//     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-//     let sampler = device.create_sampler(
-//         &wgpu::SamplerDescriptor {
-//             address_mode_u: wgpu::AddressMode::ClampToEdge,
-//             address_mode_v: wgpu::AddressMode::ClampToEdge,
-//             address_mode_w: wgpu::AddressMode::ClampToEdge,
-//             mag_filter: wgpu::FilterMode::Nearest,
-//             min_filter: wgpu::FilterMode::Nearest,
-//             mipmap_filter: wgpu::FilterMode::Nearest,
-//             ..Default::default()
-//         }
-//     );
-
-//     ( texture, view, sampler )
-// }
