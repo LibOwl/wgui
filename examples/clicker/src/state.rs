@@ -1,15 +1,8 @@
-use std::{iter, mem};
+use std::{cell::OnceCell, iter, mem};
 
 use bytemuck::{Pod, Zeroable};
-use wgpu::{util::DeviceExt, BindGroup, BufferUsages, Sampler, Texture, TextureView};
+use wgpu::util::DeviceExt;
 use winit::{window::Window, event::WindowEvent};
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Pod, Zeroable)]
-struct General {
-    resolution: [u32; 2],
-    resized: [u32; 2],
-}
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
@@ -57,6 +50,30 @@ const INDICES: &[u16] = &[
     3, 1, 2, 
 ];
 
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+struct General {
+    resolution: [u32; 2],
+    resized: [u32; 2],
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+struct Widget {
+    /// Xmin, Xmax ,Ymin, Ymax
+    limits: [f32; 4],
+    /// The type of widget.
+    /// Interpreted in the shaders.
+    ty: u32,
+    /// How resizing should be handled in the compute shader.
+    /// Interpreted in the shaders.
+    resize_type: u32,
+    /// Info for resizing.
+    /// Interpreted in the shaders.
+    resize_params: [f32; 2],
+}
+
 pub(super) struct State<'window> {
     instance: wgpu::Instance,
     surface: wgpu::Surface<'window>,
@@ -67,11 +84,24 @@ pub(super) struct State<'window> {
 
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
-    gen_bind_group: BindGroup,
-    id_bind_group: BindGroup,
-    // widgets_bind_group: BindGroup,
+
+    gen_buffer: wgpu::Buffer,
+    gen_bind_group: wgpu::BindGroup,
+
+    id_buffer: wgpu::Buffer,
+    id_buffer_len: u64,
+    id_max_buffer_len: u64,
+    id_bind_group_layout: wgpu::BindGroupLayout,
+    id_bind_group: wgpu::BindGroup,
+
+    #[allow(unused)]
+    widgets_buffer: wgpu::Buffer,
+    #[allow(unused)]
+    widgets_bind_group: wgpu::BindGroup,
+    
     pipeline: wgpu::RenderPipeline,
 
+    resized: bool,
 }
 
 impl<'window> State<'window> {
@@ -96,7 +126,7 @@ impl<'window> State<'window> {
                 &wgpu::DeviceDescriptor {
                     label: None,
                     required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::default(),
+                    required_limits: wgpu::Limits::downlevel_defaults(),
                 },
                 None, // Trace path
             )
@@ -136,7 +166,7 @@ impl<'window> State<'window> {
         let gen_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Gen Uniform Buffer"),
             contents: bytemuck::cast_slice(&[gen_info]),
-            usage: BufferUsages::UNIFORM,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let gen_bind_group_layout = 
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -169,10 +199,13 @@ impl<'window> State<'window> {
 
 
         let id_info = (0..size.width * size.height).map(|_| 0u32).collect::<Vec<u32>>();
+        let id_buffer_data: &[u8] = bytemuck::cast_slice(id_info.as_slice());
+        let id_buffer_len: u64 = id_buffer_data.len() as u64;
+        let id_max_buffer_len: u64 = id_buffer_len;
         let id_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("ID Storage Buffer"),
-            contents: bytemuck::cast_slice(id_info.as_slice()),
-            usage: BufferUsages::STORAGE,
+            contents: id_buffer_data,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
         });
         let id_bind_group_layout = 
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -204,95 +237,45 @@ impl<'window> State<'window> {
         );
 
 
-// TEXTURE
-        // let (_id_texture, id_view, id_sampler) = create_texture(
-        //     &device,
-        //     &config,
-        //     "ID Texture"
-        // );
-        // let id_bind_group_layout =
-        // device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        //     entries: &[
-        //         wgpu::BindGroupLayoutEntry {
-        //             binding: 0,
-        //             visibility: wgpu::ShaderStages::FRAGMENT,
-        //             ty: wgpu::BindingType::StorageTexture {
-        //                 access: wgpu::StorageTextureAccess::WriteOnly,
-        //                 format: wgpu::TextureFormat::R32Uint,
-        //                 view_dimension: wgpu::TextureViewDimension::D2,
-        //             },
-        //             count: None,
-        //         },
-        //         wgpu::BindGroupLayoutEntry {
-        //             binding: 1,
-        //             visibility: wgpu::ShaderStages::FRAGMENT,
-                    
-                    
-        //             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-        //             count: None,
-        //         },
-        //     ],
-        //     label: Some("id_bind_group_layout"),
-        // });
-        // let id_bind_group = device.create_bind_group(
-        //     &wgpu::BindGroupDescriptor {
-        //         layout: &id_bind_group_layout,
-        //         entries: &[
-        //             wgpu::BindGroupEntry {
-        //                 binding: 0,
-        //                 resource: wgpu::BindingResource::TextureView(&id_view),
-        //             },
-        //             wgpu::BindGroupEntry {
-        //                 binding: 1,
-        //                 resource: wgpu::BindingResource::Sampler(&id_sampler),
-        //             }
-        //         ],
-        //         label: Some("id_bind_group"),
-        //     }
-        // );
-
-
-        // let widgets_info = General {
-        //     resolution: [size.width, size.height]
-        // };
-        // let widgets_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        //     label: Some("Widgets Buffer"),
-        //     contents: bytemuck::cast_slice(&[widgets_info]),
-        //     usage: BufferUsages::UNIFORM,
-        // });
-        // let widgets_bind_group_layout = 
-        // device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        //     entries: &[
-        //         wgpu::BindGroupLayoutEntry {
-        //             binding: 0,
-        //             visibility: wgpu::ShaderStages::FRAGMENT,
-        //             ty: wgpu::BindingType::Buffer {
-        //                 ty: wgpu::BufferBindingType::Uniform,
-        //                 has_dynamic_offset: false,
-        //                 min_binding_size: None,
-        //             },
-        //             count: None,
-        //         },
-        //     ],
-        //     label: Some("widgets_bind_group_layout"),
-        // });
-        // let widgets_bind_group = device.create_bind_group(
-        //     &wgpu::BindGroupDescriptor {
-        //         layout: &widgets_bind_group_layout,
-        //         entries: &[
-        //             wgpu::BindGroupEntry {
-        //                 binding: 0,
-        //                 resource: wgpu::BindingResource::Buffer(widgets_buffer.as_entire_buffer_binding()),
-        //             },
-        //         ],
-        //         label: Some("widgets_bind_group"),
-        //     }
-        // );
+        let widgets_info = (0..size.width * size.height).map(|_| 0u32).collect::<Vec<u32>>();
+        let widgets_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Widgets Storage Buffer"),
+            contents: bytemuck::cast_slice(widgets_info.as_slice()),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let widgets_bind_group_layout = 
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+            label: Some("widgets_bind_group_layout"),
+        });
+        let widgets_bind_group = device.create_bind_group(
+            &wgpu::BindGroupDescriptor {
+                layout: &widgets_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(widgets_buffer.as_entire_buffer_binding()),
+                    },
+                ],
+                label: Some("widgets_bind_group"),
+            }
+        );
 
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("draw.wgsl").into()),
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),
@@ -330,6 +313,8 @@ impl<'window> State<'window> {
             multiview: None,
         });
 
+        let resized: bool = true;
+
         Self {
             instance,
             surface,
@@ -340,57 +325,78 @@ impl<'window> State<'window> {
 
             vertex_buffer,
             index_buffer,
+
+            gen_buffer,
             gen_bind_group,
+
+            id_buffer,
+            id_buffer_len,
+            id_max_buffer_len,
+            id_bind_group_layout,
             id_bind_group,
-            // widgets_bind_group,
+            
+            widgets_buffer,
+            widgets_bind_group,
+
             pipeline,
+
+            resized
         }
     }
 
     pub(super) fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         // Recreate Surface
-        log::info!("Surface resize {new_size:?}");
         self.instance.poll_all(true);
         self.size = new_size;
         self.config.width = new_size.width.max(1);
         self.config.height = new_size.height.max(1);
         self.surface.configure(&self.device, &self.config);
 
-        // Recreate Id Buffer
-        let id_info = (0..self.size.width * self.size.height).map(|_| 0u32).collect::<Vec<u32>>();
-        let id_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("ID Storage Buffer"),
-            contents: bytemuck::cast_slice(id_info.as_slice()),
-            usage: BufferUsages::STORAGE,
-        });
-        let id_bind_group_layout = 
-        self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-            label: Some("id_bind_group_layout"),
-        });
-        self.id_bind_group = self.device.create_bind_group(
-            &wgpu::BindGroupDescriptor {
-                layout: &id_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(id_buffer.as_entire_buffer_binding()),
-                    },
-                ],
-                label: Some("id_bind_group"),
-            }
-        );
+        // Modify Gen buffer accordingly
+        let gen_info = General {
+            resolution: [self.size.width, self.size.height],
+            resized: [1, 0]
+        };
+        self.queue.write_buffer(&self.gen_buffer, 0, bytemuck::cast_slice(&[gen_info]));
+        
+        // Clear Id Buffer, and resize it if the new one is bigger than the current one
+        self.id_buffer_len = 4 * self.size.width as u64 * self.size.height as u64;
+
+        if self.id_buffer_len > self.device.limits().max_buffer_size {
+            panic!("The wanted buffer is too large!");
+        }
+
+        if self.id_buffer_len > self.id_max_buffer_len {
+            let id_info = (0..self.size.width * self.size.height).map(|_| 0u32).collect::<Vec<u32>>();
+            let id_buffer_data: &[u8] = bytemuck::cast_slice(id_info.as_slice());
+
+            assert!(self.id_buffer_len == id_buffer_data.len() as u64); // DEBUG
+            self.id_max_buffer_len = id_buffer_data.len() as u64;
+
+            self.id_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("ID Storage Buffer"),
+                contents: id_buffer_data,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            });
+            self.id_bind_group = self.device.create_bind_group(
+                &wgpu::BindGroupDescriptor {
+                    layout: &self.id_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::Buffer(self.id_buffer.as_entire_buffer_binding()),
+                        },
+                    ],
+                    label: Some("id_bind_group"),
+                }
+            );
+        }
+        else {
+            let data = (0..self.id_buffer_len).map(|_| 0u8).collect::<Vec<u8>>();
+            self.queue.write_buffer(&self.id_buffer, 0, data.as_slice());
+        }
+
+        self.resized = true;
     }
 
     #[allow(unused)]
@@ -448,41 +454,91 @@ impl<'window> State<'window> {
         self.queue.submit(iter::once(encoder.finish()));
         output.present();
 
+        if self.resized {
+            let gen_info = General {
+                resolution: [self.size.width, self.size.height],
+                resized: [0, 0]
+            };
+            self.queue.write_buffer(&self.gen_buffer, 0, bytemuck::cast_slice(&[gen_info]));
+            self.resized = false;
+        }
+
         Ok(())
+    }
+
+    #[allow(unused)]
+    pub(super) fn id_buffer_len(&self) -> u64 {
+        self.id_buffer_len
+    }
+
+    #[allow(unused)]
+    pub(super) fn mapped_id_buffer(&mut self) -> (wgpu::Buffer, u32, u32) {
+        let mapped_id_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Readable ID Buffer"),
+            size: self.id_buffer_len,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            });
+        {
+            encoder.copy_buffer_to_buffer(
+                &self.id_buffer, 
+                0, 
+                &mapped_id_buffer, 
+                0, self.id_buffer_len
+            );
+        }
+        self.queue.submit(iter::once(encoder.finish()));
+
+
+        mapped_id_buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, |result| {
+                OnceCell::new().set(result).unwrap();
+            });
+
+        self.device.poll(wgpu::Maintain::Wait);
+
+        (mapped_id_buffer, self.size.width, self.size.height)
     }
 }
 
-#[allow(unused)]
-fn create_texture(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration, label: &str) -> (Texture, TextureView, Sampler) {
-    let size = wgpu::Extent3d {
-        width: config.width,
-        height: config.height,
-        depth_or_array_layers: 1,
-    };
-    let desc = wgpu::TextureDescriptor {
-        label: Some(label),
-        size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::R32Uint,
-        usage: wgpu::TextureUsages::STORAGE_BINDING,
-        view_formats: &[],
-    };
-    let texture = device.create_texture(&desc);
+// #[allow(unused)]
+// fn create_texture(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration, label: &str) -> (Texture, TextureView, Sampler) {
+//     let size = wgpu::Extent3d {
+//         width: config.width,
+//         height: config.height,
+//         depth_or_array_layers: 1,
+//     };
+//     let desc = wgpu::TextureDescriptor {
+//         label: Some(label),
+//         size,
+//         mip_level_count: 1,
+//         sample_count: 1,
+//         dimension: wgpu::TextureDimension::D2,
+//         format: wgpu::TextureFormat::R32Uint,
+//         usage: wgpu::TextureUsages::STORAGE_BINDING,
+//         view_formats: &[],
+//     };
+//     let texture = device.create_texture(&desc);
 
-    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    let sampler = device.create_sampler(
-        &wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        }
-    );
+//     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+//     let sampler = device.create_sampler(
+//         &wgpu::SamplerDescriptor {
+//             address_mode_u: wgpu::AddressMode::ClampToEdge,
+//             address_mode_v: wgpu::AddressMode::ClampToEdge,
+//             address_mode_w: wgpu::AddressMode::ClampToEdge,
+//             mag_filter: wgpu::FilterMode::Nearest,
+//             min_filter: wgpu::FilterMode::Nearest,
+//             mipmap_filter: wgpu::FilterMode::Nearest,
+//             ..Default::default()
+//         }
+//     );
 
-    ( texture, view, sampler )
-}
+//     ( texture, view, sampler )
+// }

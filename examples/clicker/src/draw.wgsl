@@ -48,11 +48,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     var coords: vec2<u32> = vec2<u32>(u32((in.pos.x+1.0)*0.5*f32(gen.resolution.x)), u32((-in.pos.y+1.0)*0.5*f32(gen.resolution.y)));
-
-    // TEXTURE
-    // textureStore(id_texture, coords, vec4<u32>(in.id, 0, 0, 1));
-    if (gen.resized.x != 0) {
-        id_buffer[coords.y * gen.resolution.x + coords.y] = in.id;
+    if (gen.resized.x%2 == 1) {
+        id_buffer[coords.y * gen.resolution.x + coords.x] = u32(4294967295); // DEBUG
     }
 
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);

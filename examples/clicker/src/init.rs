@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use winit::{event_loop::EventLoop, window::Window};
+use winit::{dpi::PhysicalSize, event_loop::EventLoop, window::Window};
 
 pub(super) fn init_logger() {
     cfg_if::cfg_if! {
@@ -56,7 +56,7 @@ pub(super) fn init_window() -> (EventLoop<()>, Arc<Window>) {
             .unwrap();
         builder = builder.with_canvas(Some(canvas));
     }
-    builder = builder.with_title("A cross-platform GUI app :D");
+    builder = builder.with_inner_size(PhysicalSize { width: 1000, height: 1000 }).with_title("A cross-platform GUI app :D");
     let window = Arc::new(builder.build(&event_loop).unwrap());
 
     (event_loop, window)

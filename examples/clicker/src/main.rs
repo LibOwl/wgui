@@ -47,6 +47,14 @@ fn main() {
                         ..
                     }
                     | WindowEvent::CloseRequested => {
+
+                        let (mapped_id_buffer, width, height) = state.mapped_id_buffer(); // DEBUG
+                    
+                        let slice: &[u8] = &mut mapped_id_buffer.slice(..).get_mapped_range(); // DEBUG
+                        let mut vec: Vec<u8> = Vec::with_capacity(slice.len() / 4); // DEBUG
+                        slice.into_iter().step_by(4).for_each(|&val| vec.push(val)); // DEBUG
+                        image::save_buffer("./id_buffer.png", vec.as_slice(), width, height, image::ColorType::L8).unwrap(); // DEBUG
+
                         target.exit();
                     }
                     WindowEvent::Resized(physical_size) => {
