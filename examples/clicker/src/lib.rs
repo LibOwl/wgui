@@ -5,12 +5,25 @@ use winit::{
     event::*, event_loop::{EventLoop, EventLoopWindowTarget}, keyboard::{Key, NamedKey}
 };
 
-fn main() {
+use state::{Widget, WidgetType};
+
+#[cfg(target_arch = "wasm32")]
+#[allow(unused)]
+use init::parse_url_query_string;
+
+pub fn run() {
     // Init
     init::init_logger();
     let (event_loop, window) = init::init_window();
-    let winref = &window.clone();
-    let mut state = pollster::block_on(State::new(winref));
+
+    let widgets: Vec<Widget> = (0..10000).map(|n| {
+        Widget::new([(n/100) as f32/50.0-1.0, (n/100) as f32/50.0-0.98, (n%100) as f32/50.0-1.0, (n%100) as f32/50.0-0.98], WidgetType::EllipticButton)
+    }).collect();
+    // widgets.iter().for_each(|w| {
+    //     println!("{}", w.limits[2]);
+    // });
+
+    let mut state = pollster::block_on(State::new(window, widgets));
 
     // Run loop
     cfg_if::cfg_if! {
@@ -29,14 +42,12 @@ fn main() {
         event_loop,
         move |event: Event<()>, target: &EventLoopWindowTarget<()>| 
     {
-
         // let _ = (&state.instance, &state.adapter, &state.shader, &state.pipeline_layout);
-
         match event {
             Event::WindowEvent {
                 ref event,
                 window_id,
-            } if window_id == window.id() => if !state.input(event) {
+            } if window_id == state.window.id() => if !state.input(event) {
                 match event {
                     WindowEvent::KeyboardInput {
                         event:
@@ -60,7 +71,7 @@ fn main() {
                     WindowEvent::Resized(physical_size) => {
                         state.resize(*physical_size);
 
-                        window.request_redraw();
+                        state.window.request_redraw();
                     }
                     WindowEvent::ScaleFactorChanged { .. } => {
                         
@@ -74,7 +85,7 @@ fn main() {
                             Err(e) => eprintln!("{:?}", e),
                         }
 
-                        // window.request_redraw();
+                        // state.window.request_redraw();
                     }
                     _ => {}
                 }

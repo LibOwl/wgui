@@ -1,7 +1,8 @@
 [workspace]
 members = [
     ".",
-    "examples/*"
+    "examples/*",
+    "examples/clicker/bin"
 ]
 
 [workspace.dependencies]

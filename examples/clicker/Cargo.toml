@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 wgpu = "0.19.4"
@@ -18,4 +20,15 @@ pollster = "0.3.0"
 winit = "0.29.15"
 bytemuck = { version = "1.4", features = ["derive"] }
 anyhow = "1.0"
-rand ="0.8"
+
+console_error_panic_hook = "0.1.6"
+console_log = "1.0"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4.30"
+web-sys = { version = "0.3", features = [
+    "Document",
+    "Window",
+    "Element",
+    "Location",
+]}
+fern = "0.6.2"

@@ -1,4 +1,4 @@
-use std::{cell::OnceCell, iter, mem};
+use std::{cell::OnceCell, iter, mem, sync::Arc};
 
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
@@ -23,33 +23,6 @@ impl Vertex {
     }
 }
 
-const VERTICES: &[Vertex] = &[
-    Vertex {
-        // vertex a
-        position: [-0.5, -0.5],
-        id: 1,
-    },
-    Vertex {
-        // vertex b
-        position: [0.5, -0.5],
-        id: 1,
-    },
-    Vertex {
-        // vertex d
-        position: [-0.5, 0.5],
-        id: 1,
-    },
-    Vertex {
-        // vertex c
-        position: [0.5, 0.5],
-        id: 1,
-    },
-];
-const INDICES: &[u16] = &[
-    0, 1, 2, 
-    3, 1, 2, 
-];
-
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
@@ -60,22 +33,46 @@ struct General {
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
-struct Widget {
+pub(super) struct Widget {
     /// Xmin, Xmax ,Ymin, Ymax
-    limits: [f32; 4],
-    /// The type of widget.
+    pub(super) limits: [f32; 4],
+    /// The type of widget, with parameters.
     /// Interpreted in the shaders.
-    ty: u32,
-    /// How resizing should be handled in the compute shader.
-    /// Interpreted in the shaders.
-    resize_type: u32,
-    /// Info for resizing.
-    /// Interpreted in the shaders.
-    resize_params: [f32; 2],
+    pub(super) ty: [u32; 4],
+    // /// How resizing should be handled in the compute shader.
+    // /// Interpreted in the shaders.
+    // resize_type: u32,
+    // /// Info for resizing.
+    // /// Interpreted in the shaders.
+    // resize_params: [f32; 2],
+}
+
+impl Widget {
+    /// A new widget.
+    /// - `limits` are (Xmin, Xmax ,Ymin, Ymax), are both the quad limits and the values used to draw in the fragment shader.
+    /// - `wt` is the type of widget.
+    pub(super) fn new(limits: [f32; 4], wt: WidgetType) -> Self  {
+        Self {
+            limits,
+            ty: [wt.ty(), 0, 0, 0],
+        }
+    }
+}
+
+pub(super) enum WidgetType {
+    EllipticButton,
+}
+impl WidgetType {
+    pub(super) fn ty(&self) -> u32 {
+        match self {
+            Self::EllipticButton => 0,
+        }
+    }
 }
 
 pub(super) struct State<'window> {
     instance: wgpu::Instance,
+    pub(super) window: Arc<Window>,
     surface: wgpu::Surface<'window>,
     pub(super) size: winit::dpi::PhysicalSize<u32>,
     device: wgpu::Device,
@@ -84,6 +81,7 @@ pub(super) struct State<'window> {
 
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
+    num_indices: u32,
 
     gen_buffer: wgpu::Buffer,
     gen_bind_group: wgpu::BindGroup,
@@ -107,13 +105,13 @@ pub(super) struct State<'window> {
 }
 
 impl<'window> State<'window> {
-    pub(super) async fn new(window: &'window Window) -> Self {
+    pub(super) async fn new(window: Arc<Window>, widgets: Vec<Widget>) -> Self {
         let size = window.inner_size();
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
+            backends: wgpu::Backends::VULKAN,
             ..Default::default()
         });
-        let surface = instance.create_surface(window).unwrap();
+        let surface = instance.create_surface(window.clone()).unwrap();
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
@@ -149,16 +147,35 @@ impl<'window> State<'window> {
         };
         surface.configure(&device, &config);
 
+
+        let mut vertices: Vec<Vertex> = vec![];
+        let mut indices: Vec<u16> = vec![];
+        for (i, w) in widgets.iter().enumerate() {
+            vertices.push(Vertex { position: [w.limits[0], w.limits[2]], id: i as u32 });
+            vertices.push(Vertex { position: [w.limits[0], w.limits[3]], id: i as u32 });
+            vertices.push(Vertex { position: [w.limits[1], w.limits[3]], id: i as u32 });
+            vertices.push(Vertex { position: [w.limits[1], w.limits[2]], id: i as u32 });
+            indices.push(4*i as u16);
+            indices.push(4*i as u16+1);
+            indices.push(4*i as u16+2);
+            indices.push(4*i as u16+0);
+            indices.push(4*i as u16+2);
+            indices.push(4*i as u16+3);
+        }
+
+
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
-            contents: bytemuck::cast_slice(VERTICES),
+            contents: bytemuck::cast_slice(vertices.as_slice()),
             usage: wgpu::BufferUsages::VERTEX,
         });
         let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(INDICES),
+            contents: bytemuck::cast_slice(indices.as_slice()),
             usage: wgpu::BufferUsages::INDEX,
         });
+        let num_indices: u32 = indices.len() as u32;
+        println!("{}", num_indices);
 
 
         let gen_info = General {
@@ -239,7 +256,7 @@ impl<'window> State<'window> {
         );
 
 
-        let widgets_info = (0..size.width * size.height).map(|_| 0u32).collect::<Vec<u32>>();
+        let widgets_info: Vec<Widget> = widgets;
         let widgets_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Widgets Storage Buffer"),
             contents: bytemuck::cast_slice(widgets_info.as_slice()),
@@ -275,15 +292,19 @@ impl<'window> State<'window> {
         );
 
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("draw.wgsl").into()),
+        let vertex_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Vertex Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("w__vertex.wgsl").into()),
+        });
+        let fragment_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Fragment Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("w__fragment.wgsl").into()),
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),
             bind_group_layouts: &[
                 &gen_bind_group_layout,
-                // &widgets_bind_group_layout,
+                &widgets_bind_group_layout,
                 &id_bind_group_layout,
             ],
             push_constant_ranges: &[],
@@ -292,12 +313,12 @@ impl<'window> State<'window> {
             label: Some("Render Pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: &vertex_shader,
                 entry_point: "vs_main",
                 buffers: &[Vertex::desc()],
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: &fragment_shader,
                 entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
@@ -322,6 +343,7 @@ impl<'window> State<'window> {
 
         Self {
             instance,
+            window,
             surface,
             size,
             device,
@@ -330,6 +352,7 @@ impl<'window> State<'window> {
 
             vertex_buffer,
             index_buffer,
+            num_indices,
 
             gen_buffer,
             gen_bind_group,
@@ -468,7 +491,7 @@ impl<'window> State<'window> {
         self.device.poll(wgpu::Maintain::Wait);
 
         let slice: &[u8] = &mut mapped_id_buffer.slice(..).get_mapped_range();
-        println!("{} {} {} {}", slice[0], slice[1], slice[2], slice[3]);
+        println!("{:?}", bytemuck::cast_slice::<u8, u32>(slice));
     }
 
     pub(super) fn update(&mut self) {
@@ -512,10 +535,11 @@ impl<'window> State<'window> {
 
             render_pass.set_pipeline(&self.pipeline);
             render_pass.set_bind_group(0, &self.gen_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.id_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.widgets_bind_group, &[]);
+            render_pass.set_bind_group(2, &self.id_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..6, 0, 0..1);
+            render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
         }
 
         self.queue.submit(iter::once(encoder.finish()));

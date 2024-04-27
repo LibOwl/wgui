@@ -2,6 +2,25 @@ use std::sync::Arc;
 
 use winit::{dpi::PhysicalSize, event_loop::EventLoop, window::Window};
 
+#[cfg(target_arch = "wasm32")]
+/// Parse the query string as returned by `web_sys::window()?.location().search()?` and get a
+/// specific key out of it.
+pub fn parse_url_query_string<'a>(query: &'a str, search_key: &str) -> Option<&'a str> {
+    let query_string = query.strip_prefix('?')?;
+
+    for pair in query_string.split('&') {
+        let mut pair = pair.split('=');
+        let key = pair.next()?;
+        let value = pair.next()?;
+
+        if key == search_key {
+            return Some(value);
+        }
+    }
+
+    None
+}
+
 pub(super) fn init_logger() {
     cfg_if::cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
@@ -56,7 +75,7 @@ pub(super) fn init_window() -> (EventLoop<()>, Arc<Window>) {
             .unwrap();
         builder = builder.with_canvas(Some(canvas));
     }
-    builder = builder.with_inner_size(PhysicalSize { width: 1000, height: 1000 }).with_title("A cross-platform GUI app :D");
+    builder = builder.with_inner_size(PhysicalSize { width: 200, height: 200 }).with_title("A cross-platform GUI app :D");
     let window = Arc::new(builder.build(&event_loop).unwrap());
 
     (event_loop, window)
